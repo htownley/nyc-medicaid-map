@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NYC Medicaid Provider Map</title>
+<link rel="icon" href="data:," />
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/deck.gl@9.0.36/dist.min.js"></script>
+<style>
+  :root{
+    --ink:#0f172a; --muted:#475569; --line:#e2e8f0; --bg:#ffffff;
+    --accent:#1d4ed8; --shadow:0 1px 3px rgba(15,23,42,.12),0 8px 24px rgba(15,23,42,.08);
+    font-size:16px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink)}
+  #app{display:flex;height:100%}
+  /* ---- sidebar ---- */
+  #panel{width:340px;min-width:340px;height:100%;overflow-y:auto;background:var(--bg);
+    border-right:1px solid var(--line);box-shadow:var(--shadow);z-index:2;display:flex;flex-direction:column}
+  .pad{padding:18px 20px}
+  header.brand{border-bottom:1px solid var(--line)}
+  header.brand h1{font-size:1.2rem;margin:0 0 4px;line-height:1.25}
+  header.brand p{margin:0;color:var(--muted);font-size:.85rem;line-height:1.4}
+  .count{font-size:2rem;font-weight:700;line-height:1;margin:0}
+  .count small{display:block;font-size:.8rem;font-weight:500;color:var(--muted);margin-top:4px}
+  .hint{margin:8px 0 0;font-size:.74rem;color:#94a3b8}
+  h2{font-size:.72rem;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);
+    margin:0 0 10px;font-weight:700}
+  .section{border-top:1px solid var(--line)}
+  /* search */
+  .search{width:100%;padding:10px 12px;font-size:.95rem;border:1px solid var(--line);
+    border-radius:8px;outline:none}
+  .search:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(29,78,216,.15)}
+  /* near-me */
+  .addrRow{display:flex;gap:8px}
+  .addrRow .search{flex:1}
+  .btn{padding:10px 14px;font-size:.9rem;font-weight:600;border:none;border-radius:8px;
+    background:var(--accent);color:#fff;cursor:pointer;white-space:nowrap}
+  .btn:hover{background:#1742b8}
+  .btn.ghost{background:#f1f5f9;color:var(--accent);border:1px solid var(--line);width:100%;margin-top:8px}
+  .btn.ghost:hover{background:#e8eefc}
+  .addrStatus{font-size:.8rem;color:var(--muted);margin:8px 0 0;min-height:1em}
+  .addrStatus a{color:var(--accent);cursor:pointer;text-decoration:underline}
+  .near{margin-top:12px;display:none}
+  .near.show{display:block}
+  .near h3{font-size:.78rem;margin:0 0 2px;color:var(--ink)}
+  .nrow{display:flex;align-items:center;gap:9px;padding:8px 0;border-top:1px solid var(--line);cursor:pointer}
+  .nrow:hover{background:#f8fafc}
+  .nrow .sw{width:11px;height:11px;border-radius:3px;flex:0 0 auto}
+  .nrow .info{flex:1;min-width:0}
+  .nrow .info b{display:block;font-size:.85rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .nrow .info span{font-size:.76rem;color:var(--muted)}
+  .nrow .dist{font-size:.8rem;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums;white-space:nowrap}
+  /* filter rows */
+  .row{display:flex;align-items:center;gap:10px;padding:7px 0;cursor:pointer;user-select:none}
+  .row input{width:18px;height:18px;accent-color:var(--accent);cursor:pointer;margin:0}
+  .row .sw{width:14px;height:14px;border-radius:4px;flex:0 0 auto}
+  .row .nm{flex:1;font-size:.92rem}
+  .row .ct{font-size:.8rem;color:var(--muted);font-variant-numeric:tabular-nums}
+  .row.off .nm,.row.off .ct{color:#94a3b8}
+  .minibtns{display:flex;gap:8px;margin-bottom:8px}
+  .minibtns button{flex:1;font-size:.78rem;padding:6px;border:1px solid var(--line);
+    background:#f8fafc;border-radius:7px;cursor:pointer;color:var(--muted)}
+  .minibtns button:hover{border-color:var(--accent);color:var(--accent)}
+  /* about */
+  details.about{font-size:.84rem;color:var(--muted);line-height:1.5}
+  details.about summary{cursor:pointer;font-weight:600;color:var(--ink)}
+  details.about ul{padding-left:18px;margin:8px 0}
+  details.about a{color:var(--accent)}
+  .foot{margin-top:auto;font-size:.74rem;color:#94a3b8}
+  /* ---- map ---- */
+  #map{flex:1;position:relative;height:100%}
+  /* detail popup card (a location + every provider at it) */
+  #detail{position:absolute;top:14px;right:14px;width:320px;max-height:calc(100% - 28px);
+    background:#fff;border-radius:12px;box-shadow:var(--shadow);z-index:3;display:none;
+    font-size:.9rem;line-height:1.45;flex-direction:column}
+  #detail.show{display:flex}
+  #detail .x{position:absolute;top:8px;right:12px;cursor:pointer;color:var(--muted);
+    font-size:1.3rem;line-height:1;border:none;background:none;z-index:1}
+  #detail .dhead{padding:16px 18px 12px;border-bottom:1px solid var(--line)}
+  #detail .dAddr{font-weight:700;font-size:1rem;margin:0 22px 2px 0}
+  #detail .dSub{color:var(--muted);font-size:.82rem}
+  #detail .dList{overflow-y:auto;padding:4px 18px 14px}
+  #detail .drow{display:flex;gap:9px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--line)}
+  #detail .drow:first-child{border-top:none}
+  #detail .drow .sw{width:11px;height:11px;border-radius:3px;margin-top:4px;flex:0 0 auto}
+  #detail .drow .info{min-width:0}
+  #detail .drow .info b{font-size:.88rem}
+  #detail .drow .info span{display:block;font-size:.76rem;color:var(--muted)}
+  /* loading */
+  #load{position:absolute;inset:0;background:rgba(255,255,255,.92);z-index:5;display:flex;
+    flex-direction:column;align-items:center;justify-content:center;gap:14px;color:var(--muted)}
+  .spin{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--accent);
+    border-radius:50%;animation:s 1s linear infinite}
+  @keyframes s{to{transform:rotate(360deg)}}
+  .tip{font:13px/1.4 system-ui;background:#0f172a;color:#fff;padding:8px 10px;border-radius:8px;
+    max-width:260px;box-shadow:var(--shadow)}
+  .tip b{display:block;font-size:13px;margin-bottom:2px}
+  .tip span{color:#cbd5e1}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="panel">
+    <header class="brand pad">
+      <h1>NYC Medicaid Providers</h1>
+      <p>Find dental, vision &amp; other providers that accept Medicaid in NYC.</p>
+    </header>
+
+    <div class="pad">
+      <p class="count"><span id="visCount">0</span>
+        <small>providers at <span id="locCount">0</span> locations</small></p>
+      <p class="hint">Each dot is a location · larger = more providers there</p>
+    </div>
+
+    <div class="section pad">
+      <h2>Find providers near you</h2>
+      <div class="addrRow">
+        <input id="addr" class="search" type="text" placeholder="Address or ZIP in NYC" />
+        <button id="findBtn" class="btn">Find</button>
+      </div>
+      <button id="geoBtn" class="btn ghost">📍 Use my location</button>
+      <p id="addrStatus" class="addrStatus"></p>
+      <div id="near" class="near">
+        <h3>Nearest <span id="nearScope">providers</span></h3>
+        <div id="nearList"></div>
+      </div>
+    </div>
+
+    <div class="section pad">
+      <h2>Search by name</h2>
+      <input id="search" class="search" type="text" placeholder="e.g. clinic, dental, a name…" />
+    </div>
+
+    <div class="section pad">
+      <h2>Provider category</h2>
+      <div class="minibtns">
+        <button id="catAll">Select all</button>
+        <button id="catNone">Clear</button>
+      </div>
+      <div id="cats"></div>
+    </div>
+
+    <div class="section pad">
+      <h2>Borough</h2>
+      <div id="boros"></div>
+    </div>
+
+    <div class="section pad">
+      <details class="about">
+        <summary>About this data</summary>
+        <ul>
+          <li><b>Source:</b> NY State <a id="srcLink" target="_blank" rel="noopener">Medicaid Enrolled Provider Listing</a>. Snapshot: <span id="genDate">—</span>.</li>
+          <li><b>Enrolled ≠ in-network.</b> Most NYC Medicaid members are in managed-care plans; this lists Medicaid enrollment, a near-complete superset. Confirm a provider takes <i>your</i> plan.</li>
+          <li><b>Vision</b> = optometry/optical only (eye MDs aren't separable in this data).</li>
+          <li>No phone numbers in the source; pins show address + NPI.</li>
+        </ul>
+      </details>
+      <p class="foot">Demo only · not an official directory.</p>
+    </div>
+  </aside>
+
+  <div id="map">
+    <div id="detail">
+      <button class="x" aria-label="Close" onclick="hideDetail()">×</button>
+      <div class="dhead">
+        <p class="dAddr" id="dAddr"></p>
+        <div class="dSub" id="dSub"></div>
+      </div>
+      <div class="dList" id="dList"></div>
+    </div>
+    <div id="load"><div class="spin"></div><div id="loadMsg">Loading providers…</div></div>
+  </div>
+</div>
+
+<script>
+// 12-color categorical palette, indexed to data.json `categories`
+const PALETTE = [
+  [14,165,164],  // 0 Dental
+  [249,115,22],  // 1 Vision
+  [99,102,241],  // 2 Physicians & Primary Care
+  [168,85,247],  // 3 Behavioral & Mental Health
+  [34,197,94],   // 4 Therapy & Rehab
+  [239,68,68],   // 5 Pharmacy
+  [14,165,233],  // 6 Hospitals & Clinics
+  [234,179,8],   // 7 Labs & Diagnostics
+  [236,72,153],  // 8 Long-Term & Home Care
+  [100,116,139], // 9 Transportation
+  [146,64,14],   // 10 Equipment & Supplies
+  [148,163,184], // 11 Other Services
+];
+const rgbCss = c => `rgb(${c[0]},${c[1]},${c[2]})`;
+const DEFAULT_ON = new Set([0,1]); // lead with Dental + Vision
+const BOROUGHS = ["Bronx","Brooklyn","Manhattan","Queens","Staten Island"];
+const titleCase = s => (s||"").toLowerCase().replace(/\b([a-z])/g,(m,c)=>c.toUpperCase());
+
+let ALL=[], CATS=[], overlay, map;
+const state = { cats:new Set(DEFAULT_ON), boros:new Set(BOROUGHS), search:"", origin:null };
+const esc = s => (s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+const map_ = new maplibregl.Map({
+  container:"map",
+  style:{
+    version:8,
+    sources:{carto:{type:"raster",
+      tiles:["a","b","c","d"].map(s=>`https://${s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png`),
+      tileSize:256, attribution:"© OpenStreetMap contributors © CARTO"}},
+    layers:[{id:"carto",type:"raster",source:"carto"}]
+  },
+  center:[-73.95,40.70], zoom:10, minZoom:9, maxZoom:18
+});
+map = map_;
+map.addControl(new maplibregl.NavigationControl({showCompass:false}),"bottom-right");
+
+function makeLayer(locs){
+  return new deck.ScatterplotLayer({
+    id:"locations", data:locs,
+    getPosition:d=>d.p,
+    getFillColor:d=>PALETTE[d.cat],
+    getRadius:d=>Math.min(26, 3 + 2.2*Math.sqrt(d.count)),
+    radiusUnits:"pixels", radiusMinPixels:3,
+    stroked:true, getLineColor:[255,255,255],
+    lineWidthUnits:"pixels", getLineWidth:1, lineWidthMinPixels:0.6,
+    opacity:0.85, pickable:true,
+    onClick:info=>{ if(info.object) showDetail(info.object); }
+  });
+}
+
+// group providers sharing a coordinate into one location dot
+function aggregate(providers){
+  const byLoc=new Map();
+  for(const d of providers){
+    const k=d.p[0]+","+d.p[1];
+    let loc=byLoc.get(k);
+    if(!loc){ loc={p:d.p,a:d.a,ci:d.ci,z:d.z,b:d.b,items:[],catCount:{}}; byLoc.set(k,loc); }
+    loc.items.push(d);
+    loc.catCount[d.c]=(loc.catCount[d.c]||0)+1;
+  }
+  const locs=[];
+  for(const loc of byLoc.values()){
+    loc.count=loc.items.length;
+    let best=0,bestN=-1;                     // color by the most common category here
+    for(const c in loc.catCount){ if(loc.catCount[c]>bestN){bestN=loc.catCount[c];best=+c;} }
+    loc.cat=best;
+    locs.push(loc);
+  }
+  return locs;
+}
+
+function applyFilters(){
+  if(!ALL.length || !overlay) return;
+  const {cats,boros,search}=state;
+  const q=search.trim().toLowerCase();
+  const providers = ALL.filter(d=>
+    cats.has(d.c) && boros.has(d.b) && (q==="" || d.n.toLowerCase().includes(q))
+  );
+  const locs = aggregate(providers);
+  overlay.setProps({layers:[makeLayer(locs)]});
+  document.getElementById("visCount").textContent = providers.length.toLocaleString();
+  document.getElementById("locCount").textContent = locs.length.toLocaleString();
+  refreshCatRows();
+  renderNearest(locs);
+}
+
+// ---------- detail card (a location and all its providers) ----------
+function showDetail(loc){
+  document.getElementById("dAddr").textContent = titleCase(loc.a);
+  document.getElementById("dSub").textContent =
+    `${titleCase(loc.ci)} ${loc.z} · ${loc.b} · ${loc.count} provider${loc.count===1?"":"s"}`;
+  const list=document.getElementById("dList"); list.innerHTML="";
+  loc.items.slice().sort((a,b)=> a.c-b.c || a.n.localeCompare(b.n)).forEach(it=>{
+    const row=document.createElement("div"); row.className="drow";
+    row.innerHTML=`<span class="sw" style="background:${rgbCss(PALETTE[it.c])}"></span>
+      <span class="info"><b>${esc(titleCase(it.n))}</b>
+      <span>${esc(titleCase(it.pr))} · NPI ${it.np}</span></span>`;
+    list.appendChild(row);
+  });
+  list.scrollTop=0;
+  document.getElementById("detail").classList.add("show");
+}
+function hideDetail(){document.getElementById("detail").classList.remove("show");}
+
+// ---------- legend / filter UI ----------
+function buildCatRows(){
+  const counts=new Array(CATS.length).fill(0);
+  for(const d of ALL) counts[d.c]++;
+  const wrap=document.getElementById("cats"); wrap.innerHTML="";
+  CATS.forEach((name,i)=>{
+    const row=document.createElement("label"); row.className="row"; row.dataset.i=i;
+    row.innerHTML=`<input type="checkbox" ${state.cats.has(i)?"checked":""}/>
+      <span class="sw" style="background:${rgbCss(PALETTE[i])}"></span>
+      <span class="nm">${name}</span>
+      <span class="ct">${counts[i].toLocaleString()}</span>`;
+    row.querySelector("input").addEventListener("change",e=>{
+      e.target.checked?state.cats.add(i):state.cats.delete(i); applyFilters();
+    });
+    wrap.appendChild(row);
+  });
+}
+function refreshCatRows(){
+  document.querySelectorAll("#cats .row").forEach(r=>{
+    const i=+r.dataset.i, on=state.cats.has(i);
+    r.classList.toggle("off",!on); r.querySelector("input").checked=on;
+  });
+}
+function buildBoroRows(){
+  const wrap=document.getElementById("boros"); wrap.innerHTML="";
+  BOROUGHS.forEach(b=>{
+    const row=document.createElement("label"); row.className="row";
+    row.innerHTML=`<input type="checkbox" checked/><span class="nm">${b}</span>`;
+    row.querySelector("input").addEventListener("change",e=>{
+      e.target.checked?state.boros.add(b):state.boros.delete(b); applyFilters();
+    });
+    wrap.appendChild(row);
+  });
+}
+
+let searchT;
+document.getElementById("search").addEventListener("input",e=>{
+  clearTimeout(searchT);
+  searchT=setTimeout(()=>{state.search=e.target.value; applyFilters();},180);
+});
+document.getElementById("catAll").onclick=()=>{CATS.forEach((_,i)=>state.cats.add(i));applyFilters();};
+document.getElementById("catNone").onclick=()=>{state.cats.clear();applyFilters();};
+
+// ---------- near me ----------
+const NEAR_N = 20;
+let originMarker = null;
+const setAddrStatus = html => { document.getElementById("addrStatus").innerHTML = html; };
+
+function haversineMi(a,b){ // a,b = [lon,lat]
+  const R=3958.8, rad=x=>x*Math.PI/180;
+  const dLat=rad(b[1]-a[1]), dLon=rad(b[0]-a[0]);
+  const h=Math.sin(dLat/2)**2 + Math.cos(rad(a[1]))*Math.cos(rad(b[1]))*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+const fmtDist = mi => mi<0.1 ? `${Math.round(mi*5280)} ft` : `${mi.toFixed(1)} mi`;
+
+function setOrigin(lon,lat,label){
+  state.origin={p:[lon,lat],label};
+  if(originMarker) originMarker.setLngLat([lon,lat]);
+  else originMarker=new maplibregl.Marker({color:"#1d4ed8"}).setLngLat([lon,lat]).addTo(map);
+  map.flyTo({center:[lon,lat],zoom:14});
+  setAddrStatus(`Near <b>${esc(label)}</b> · <a data-clear>clear</a>`);
+  applyFilters();
+}
+function clearOrigin(){
+  state.origin=null;
+  if(originMarker){originMarker.remove();originMarker=null;}
+  document.getElementById("addr").value="";
+  setAddrStatus("");
+  applyFilters();
+}
+
+function renderNearest(locs){
+  const box=document.getElementById("near"), list=document.getElementById("nearList");
+  if(!state.origin){ box.classList.remove("show"); return; }
+  box.classList.add("show");
+  if(!locs.length){
+    document.getElementById("nearScope").textContent="locations";
+    list.innerHTML=`<p class="addrStatus">No providers match the current filters.</p>`;
+    return;
+  }
+  const o=state.origin.p;
+  const ranked=locs.map(l=>({l,mi:haversineMi(o,l.p)})).sort((a,b)=>a.mi-b.mi).slice(0,NEAR_N);
+  document.getElementById("nearScope").textContent=`${ranked.length} locations`;
+  list.innerHTML="";
+  for(const {l,mi} of ranked){
+    const row=document.createElement("div"); row.className="nrow";
+    row.innerHTML=`<span class="sw" style="background:${rgbCss(PALETTE[l.cat])}"></span>
+      <span class="info"><b>${esc(titleCase(l.a))}</b><span>${l.count} provider${l.count===1?"":"s"} · ${l.b}</span></span>
+      <span class="dist">${fmtDist(mi)}</span>`;
+    row.addEventListener("click",()=>{ showDetail(l); map.easeTo({center:l.p,zoom:Math.max(map.getZoom(),15)}); });
+    list.appendChild(row);
+  }
+}
+
+async function geocode(text){
+  const r=await fetch("https://geosearch.planninglabs.nyc/v2/search?size=1&text="+encodeURIComponent(text));
+  if(!r.ok) throw new Error("geocoder unavailable");
+  const j=await r.json();
+  if(!j.features || !j.features.length) return null;
+  const f=j.features[0];
+  return {lon:f.geometry.coordinates[0], lat:f.geometry.coordinates[1], label:f.properties.label};
+}
+async function doFind(){
+  const t=document.getElementById("addr").value.trim();
+  if(!t) return;
+  setAddrStatus("Searching…");
+  try{
+    const g=await geocode(t);
+    if(!g){ setAddrStatus("No NYC match found — try a street address or ZIP."); return; }
+    setOrigin(g.lon,g.lat,g.label);
+  }catch(e){ setAddrStatus("Address lookup failed. Check your connection."); }
+}
+function doGeo(){
+  if(!navigator.geolocation){ setAddrStatus("Geolocation isn't supported here."); return; }
+  setAddrStatus("Locating you…");
+  navigator.geolocation.getCurrentPosition(
+    pos=>setOrigin(pos.coords.longitude,pos.coords.latitude,"your location"),
+    ()=>setAddrStatus("Couldn't get your location (permission denied or unavailable)."),
+    {enableHighAccuracy:true,timeout:10000});
+}
+
+document.getElementById("findBtn").onclick=doFind;
+document.getElementById("geoBtn").onclick=doGeo;
+document.getElementById("addr").addEventListener("keydown",e=>{ if(e.key==="Enter") doFind(); });
+document.getElementById("addrStatus").addEventListener("click",e=>{
+  if(e.target.matches("[data-clear]")) clearOrigin();
+});
+
+// ---------- boot ----------
+fetch("data.json").then(r=>{
+  if(!r.ok) throw new Error("data.json not found — run: python3 fetch_data.py, then serve with python3 -m http.server");
+  document.getElementById("loadMsg").textContent="Parsing 350k+ providers…";
+  return r.json();
+}).then(snap=>{
+  ALL=snap.points; CATS=snap.categories;
+  document.getElementById("genDate").textContent=snap.meta.generated;
+  document.getElementById("srcLink").href=snap.meta.source_url;
+  buildCatRows(); buildBoroRows();
+  overlay=new deck.MapboxOverlay({
+    interleaved:false,
+    layers:[],
+    getTooltip:({object})=>object && {html:
+      `<div class="tip"><b>${esc(titleCase(object.a))}</b><span>${object.count} provider${object.count===1?"":"s"} · ${CATS[object.cat]}</span></div>`}
+  });
+  map.addControl(overlay);
+  const start=()=>{applyFilters(); document.getElementById("load").style.display="none";};
+  map.loaded()?start():map.once("load",start);
+}).catch(err=>{
+  document.getElementById("load").innerHTML=
+    `<div style="max-width:280px;text-align:center;color:#b91c1c">${err.message}</div>`;
+});
+</script>
+</body>
+</html>

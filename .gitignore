@@ -1,0 +1,11 @@
+# Generated GeoJSON export — exceeds GitHub's 100 MB file limit.
+# Regenerable any time via `python3 fetch_data.py`.
+providers.geojson
+
+# Local Claude Code settings (per-machine state, not project content)
+.claude/
+
+# OS / Python
+.DS_Store
+*.pyc
+__pycache__/
