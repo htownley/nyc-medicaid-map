@@ -11,13 +11,15 @@ Scope (see plan): 5 NYC counties, all professions, direct-service providers only
 per provider-per-address.
 
 Outputs (overwritten each run):
-  - data.json          compact snapshot the map loads (categories + points)
+  - data/meta.json     categories, per-category counts, snapshot date (loaded at boot)
+  - data/cat-N.json    points for category N (loaded on demand when a filter is enabled)
   - providers.geojson  portable GeoJSON for GIS / other tools
 
 Refresh with:  python3 fetch_data.py
 """
 
 import json
+import os
 import sys
 import urllib.parse
 import urllib.request
@@ -225,19 +227,28 @@ def clean(rows):
 
 
 def write_outputs(points):
-    snapshot = {
-        "meta": {
-            "source": "NY State Medicaid Enrolled Provider Listing (keti-qx5t)",
-            "source_url": "https://health.data.ny.gov/Health/Medicaid-Enrolled-Provider-Listing/keti-qx5t",
-            "generated": date.today().isoformat(),
-            "scope": "NYC, all professions, direct-service (FFS+MCO)",
-            "count": len(points),
-        },
-        "categories": CATEGORIES,
-        "points": points,
+    meta = {
+        "source": "NY State Medicaid Enrolled Provider Listing (keti-qx5t)",
+        "source_url": "https://health.data.ny.gov/Health/Medicaid-Enrolled-Provider-Listing/keti-qx5t",
+        "generated": date.today().isoformat(),
+        "scope": "NYC, all professions, direct-service (FFS+MCO)",
+        "count": len(points),
     }
-    with open("data.json", "w") as f:
-        json.dump(snapshot, f, separators=(",", ":"))
+
+    by_cat = [[] for _ in CATEGORIES]
+    for pt in points:
+        by_cat[pt["c"]].append(pt)
+
+    os.makedirs("data", exist_ok=True)
+    with open("data/meta.json", "w") as f:
+        json.dump({
+            "meta": meta,
+            "categories": CATEGORIES,
+            "counts": [len(pts) for pts in by_cat],
+        }, f, separators=(",", ":"))
+    for i, pts in enumerate(by_cat):
+        with open(f"data/cat-{i}.json", "w") as f:
+            json.dump(pts, f, separators=(",", ":"))
 
     features = [{
         "type": "Feature",
@@ -249,7 +260,7 @@ def write_outputs(points):
         },
     } for pt in points]
     with open("providers.geojson", "w") as f:
-        json.dump({"type": "FeatureCollection", "metadata": snapshot["meta"],
+        json.dump({"type": "FeatureCollection", "metadata": meta,
                    "features": features}, f, separators=(",", ":"))
 
 
@@ -274,7 +285,8 @@ def main():
     if stats["unmapped"]:
         print(f"\n[!] professions not in mapping (-> Other Services): "
               f"{sorted(stats['unmapped'])}", file=sys.stderr)
-    print("\n-> wrote data.json, providers.geojson", file=sys.stderr)
+    print(f"\n-> wrote data/meta.json, data/cat-0..{len(CATEGORIES)-1}.json, "
+          "providers.geojson", file=sys.stderr)
 
 
 if __name__ == "__main__":

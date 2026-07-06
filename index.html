@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="Find dental, vision, and other Medicaid-enrolled providers near you across the five NYC boroughs." />
 <title>NYC Medicaid Provider Map</title>
 <link rel="icon" href="data:," />
 <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
@@ -26,7 +27,7 @@
   header.brand p{margin:0;color:var(--muted);font-size:.85rem;line-height:1.4}
   .count{font-size:2rem;font-weight:700;line-height:1;margin:0}
   .count small{display:block;font-size:.8rem;font-weight:500;color:var(--muted);margin-top:4px}
-  .hint{margin:8px 0 0;font-size:.74rem;color:#94a3b8}
+  .hint{margin:8px 0 0;font-size:.74rem;color:var(--muted)}
   h2{font-size:.72rem;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);
     margin:0 0 10px;font-weight:700}
   .section{border-top:1px solid var(--line)}
@@ -47,7 +48,9 @@
   .near{margin-top:12px;display:none}
   .near.show{display:block}
   .near h3{font-size:.78rem;margin:0 0 2px;color:var(--ink)}
-  .nrow{display:flex;align-items:center;gap:9px;padding:8px 0;border-top:1px solid var(--line);cursor:pointer}
+  .nrow{display:flex;align-items:center;gap:9px;padding:8px 0;cursor:pointer;
+    width:100%;background:none;border:none;border-top:1px solid var(--line);
+    font:inherit;color:inherit;text-align:left}
   .nrow:hover{background:#f8fafc}
   .nrow .sw{width:11px;height:11px;border-radius:3px;flex:0 0 auto}
   .nrow .info{flex:1;min-width:0}
@@ -60,7 +63,7 @@
   .row .sw{width:14px;height:14px;border-radius:4px;flex:0 0 auto}
   .row .nm{flex:1;font-size:.92rem}
   .row .ct{font-size:.8rem;color:var(--muted);font-variant-numeric:tabular-nums}
-  .row.off .nm,.row.off .ct{color:#94a3b8}
+  .row.off .nm,.row.off .ct{color:#64748b}
   .minibtns{display:flex;gap:8px;margin-bottom:8px}
   .minibtns button{flex:1;font-size:.78rem;padding:6px;border:1px solid var(--line);
     background:#f8fafc;border-radius:7px;cursor:pointer;color:var(--muted)}
@@ -70,7 +73,7 @@
   details.about summary{cursor:pointer;font-weight:600;color:var(--ink)}
   details.about ul{padding-left:18px;margin:8px 0}
   details.about a{color:var(--accent)}
-  .foot{margin-top:auto;font-size:.74rem;color:#94a3b8}
+  .foot{margin-top:auto;font-size:.74rem;color:var(--muted)}
   /* ---- map ---- */
   #map{flex:1;position:relative;height:100%}
   /* detail popup card (a location + every provider at it) */
@@ -100,18 +103,37 @@
     max-width:260px;box-shadow:var(--shadow)}
   .tip b{display:block;font-size:13px;margin-bottom:2px}
   .tip span{color:#cbd5e1}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  /* ---- mobile: map fills the screen, panel becomes a bottom sheet ---- */
+  .grip{display:none}
+  @media (max-width:768px){
+    #app{display:block}
+    #map{position:fixed;inset:0;height:auto}
+    #panel{position:fixed;left:0;right:0;bottom:0;top:auto;width:auto;min-width:0;
+      height:var(--sheetH,45dvh);z-index:4;border-right:none;border-top:1px solid var(--line);
+      border-radius:16px 16px 0 0;box-shadow:0 -8px 24px rgba(15,23,42,.18);
+      transition:height .25s ease}
+    .grip{display:block;width:100%;padding:10px 0 6px;background:none;border:none;
+      cursor:grab;touch-action:none;flex:0 0 auto}
+    .grip span{display:block;width:44px;height:5px;border-radius:3px;background:#cbd5e1;margin:0 auto}
+    #detail{position:fixed;top:auto;bottom:0;left:0;right:0;width:auto;max-height:60dvh;
+      border-radius:16px 16px 0 0;z-index:6}
+    .maplibregl-ctrl-bottom-right{bottom:var(--sheetH,45dvh)}
+  }
 </style>
 </head>
 <body>
 <div id="app">
   <aside id="panel">
+    <button id="grip" class="grip" aria-expanded="true"
+      aria-label="Expand or collapse the provider panel"><span></span></button>
     <header class="brand pad">
       <h1>NYC Medicaid Providers</h1>
       <p>Find dental, vision &amp; other providers that accept Medicaid in NYC.</p>
     </header>
 
     <div class="pad">
-      <p class="count"><span id="visCount">0</span>
+      <p class="count" aria-live="polite"><span id="visCount">0</span>
         <small>providers at <span id="locCount">0</span> locations</small></p>
       <p class="hint">Each dot is a location · larger = more providers there</p>
     </div>
@@ -123,7 +145,7 @@
         <button id="findBtn" class="btn">Find</button>
       </div>
       <button id="geoBtn" class="btn ghost">📍 Use my location</button>
-      <p id="addrStatus" class="addrStatus"></p>
+      <p id="addrStatus" class="addrStatus" aria-live="polite"></p>
       <div id="near" class="near">
         <h3>Nearest <span id="nearScope">providers</span></h3>
         <div id="nearList"></div>
@@ -172,7 +194,7 @@
       </div>
       <div class="dList" id="dList"></div>
     </div>
-    <div id="load"><div class="spin"></div><div id="loadMsg">Loading providers…</div></div>
+    <div id="load" role="status"><div class="spin"></div><div id="loadMsg">Loading providers…</div></div>
   </div>
 </div>
 
@@ -197,7 +219,9 @@ const DEFAULT_ON = new Set([0,1]); // lead with Dental + Vision
 const BOROUGHS = ["Bronx","Brooklyn","Manhattan","Queens","Staten Island"];
 const titleCase = s => (s||"").toLowerCase().replace(/\b([a-z])/g,(m,c)=>c.toUpperCase());
 
-let ALL=[], CATS=[], overlay, map;
+let CATS=[], COUNTS=[], overlay, map;
+const CAT_DATA=[];   // per-category point arrays, fetched on demand
+const catLoads=[];   // in-flight fetch promise per category
 const state = { cats:new Set(DEFAULT_ON), boros:new Set(BOROUGHS), search:"", origin:null };
 const esc = s => (s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
@@ -250,13 +274,40 @@ function aggregate(providers){
   return locs;
 }
 
+// fetch one category's points on demand (legend row shows a busy state meanwhile)
+function catRow(i){ return document.querySelector(`#cats .row[data-i="${i}"]`); }
+function setCatBusy(i,busy){
+  const r=catRow(i); if(!r) return;
+  r.setAttribute("aria-busy", busy?"true":"false");
+  r.querySelector(".ct").textContent = busy ? "…" : (COUNTS[i]||0).toLocaleString();
+}
+function loadCat(i){
+  if(CAT_DATA[i]) return Promise.resolve();
+  if(!catLoads[i]){
+    setCatBusy(i,true);
+    catLoads[i]=fetch(`data/cat-${i}.json`)
+      .then(r=>{ if(!r.ok) throw new Error("fetch failed"); return r.json(); })
+      .then(pts=>{ CAT_DATA[i]=pts; setCatBusy(i,false); })
+      .catch(err=>{
+        catLoads[i]=null; setCatBusy(i,false);
+        state.cats.delete(i); refreshCatRows();
+        throw err;
+      });
+  }
+  return catLoads[i];
+}
+
 function applyFilters(){
-  if(!ALL.length || !overlay) return;
+  if(!overlay) return;
   const {cats,boros,search}=state;
   const q=search.trim().toLowerCase();
-  const providers = ALL.filter(d=>
-    cats.has(d.c) && boros.has(d.b) && (q==="" || d.n.toLowerCase().includes(q))
-  );
+  const providers=[];
+  for(const i of cats){
+    const pts=CAT_DATA[i]; if(!pts) continue;
+    for(const d of pts){
+      if(boros.has(d.b) && (q==="" || d.n.toLowerCase().includes(q))) providers.push(d);
+    }
+  }
   const locs = aggregate(providers);
   overlay.setProps({layers:[makeLayer(locs)]});
   document.getElementById("visCount").textContent = providers.length.toLocaleString();
@@ -266,6 +317,7 @@ function applyFilters(){
 }
 
 // ---------- detail card (a location and all its providers) ----------
+let detailReturnFocus=null;
 function showDetail(loc){
   document.getElementById("dAddr").textContent = titleCase(loc.a);
   document.getElementById("dSub").textContent =
@@ -279,23 +331,33 @@ function showDetail(loc){
     list.appendChild(row);
   });
   list.scrollTop=0;
-  document.getElementById("detail").classList.add("show");
+  const card=document.getElementById("detail");
+  if(!card.classList.contains("show")) detailReturnFocus=document.activeElement;
+  card.classList.add("show");
+  card.querySelector(".x").focus();
 }
-function hideDetail(){document.getElementById("detail").classList.remove("show");}
+function hideDetail(){
+  document.getElementById("detail").classList.remove("show");
+  if(detailReturnFocus && document.contains(detailReturnFocus)) detailReturnFocus.focus();
+  detailReturnFocus=null;
+}
+document.addEventListener("keydown",e=>{
+  if(e.key==="Escape" && document.getElementById("detail").classList.contains("show")) hideDetail();
+});
 
 // ---------- legend / filter UI ----------
 function buildCatRows(){
-  const counts=new Array(CATS.length).fill(0);
-  for(const d of ALL) counts[d.c]++;
   const wrap=document.getElementById("cats"); wrap.innerHTML="";
   CATS.forEach((name,i)=>{
     const row=document.createElement("label"); row.className="row"; row.dataset.i=i;
     row.innerHTML=`<input type="checkbox" ${state.cats.has(i)?"checked":""}/>
       <span class="sw" style="background:${rgbCss(PALETTE[i])}"></span>
       <span class="nm">${name}</span>
-      <span class="ct">${counts[i].toLocaleString()}</span>`;
+      <span class="ct">${(COUNTS[i]||0).toLocaleString()}</span>`;
     row.querySelector("input").addEventListener("change",e=>{
-      e.target.checked?state.cats.add(i):state.cats.delete(i); applyFilters();
+      if(e.target.checked){ state.cats.add(i); loadCat(i).then(applyFilters).catch(()=>{}); }
+      else state.cats.delete(i);
+      applyFilters();
     });
     wrap.appendChild(row);
   });
@@ -323,7 +385,12 @@ document.getElementById("search").addEventListener("input",e=>{
   clearTimeout(searchT);
   searchT=setTimeout(()=>{state.search=e.target.value; applyFilters();},180);
 });
-document.getElementById("catAll").onclick=()=>{CATS.forEach((_,i)=>state.cats.add(i));applyFilters();};
+document.getElementById("catAll").onclick=()=>{
+  CATS.forEach((_,i)=>state.cats.add(i));
+  refreshCatRows();
+  Promise.all(CATS.map((_,i)=>loadCat(i).then(applyFilters).catch(()=>{})));
+  applyFilters();
+};
 document.getElementById("catNone").onclick=()=>{state.cats.clear();applyFilters();};
 
 // ---------- near me ----------
@@ -369,7 +436,7 @@ function renderNearest(locs){
   document.getElementById("nearScope").textContent=`${ranked.length} locations`;
   list.innerHTML="";
   for(const {l,mi} of ranked){
-    const row=document.createElement("div"); row.className="nrow";
+    const row=document.createElement("button"); row.type="button"; row.className="nrow";
     row.innerHTML=`<span class="sw" style="background:${rgbCss(PALETTE[l.cat])}"></span>
       <span class="info"><b>${esc(titleCase(l.a))}</b><span>${l.count} provider${l.count===1?"":"s"} · ${l.b}</span></span>
       <span class="dist">${fmtDist(mi)}</span>`;
@@ -412,15 +479,56 @@ document.getElementById("addrStatus").addEventListener("click",e=>{
   if(e.target.matches("[data-clear]")) clearOrigin();
 });
 
+// ---------- mobile bottom sheet ----------
+const grip=document.getElementById("grip"), panelEl=document.getElementById("panel");
+const SHEET_H={peek:"110px", half:"45dvh", full:"92dvh"};
+let sheet="half";
+function setSheet(s){
+  sheet=s;
+  panelEl.dataset.sheet=s;
+  document.documentElement.style.setProperty("--sheetH",SHEET_H[s]);
+  grip.setAttribute("aria-expanded", s==="peek" ? "false" : "true");
+}
+setSheet("half");
+let gripDrag=null;
+grip.addEventListener("pointerdown",e=>{
+  gripDrag={y:e.clientY, h:panelEl.getBoundingClientRect().height, moved:false};
+  grip.setPointerCapture(e.pointerId);
+  panelEl.style.transition="none";
+});
+grip.addEventListener("pointermove",e=>{
+  if(!gripDrag) return;
+  const dy=gripDrag.y-e.clientY;               // drag up = taller
+  if(Math.abs(dy)>4) gripDrag.moved=true;
+  const H=window.innerHeight;
+  panelEl.style.height=Math.min(.92*H, Math.max(90, gripDrag.h+dy))+"px";
+});
+function gripEnd(){
+  if(!gripDrag) return;
+  const moved=gripDrag.moved;
+  const h=panelEl.getBoundingClientRect().height, H=window.innerHeight;
+  gripDrag=null;
+  panelEl.style.transition=""; panelEl.style.height="";
+  if(moved){
+    const targets={peek:110, half:.45*H, full:.92*H};
+    let best="half", d=Infinity;
+    for(const k in targets){ const dd=Math.abs(h-targets[k]); if(dd<d){d=dd; best=k;} }
+    setSheet(best);
+  }else{
+    setSheet(sheet==="peek" ? "half" : sheet==="half" ? "full" : "peek");
+  }
+}
+grip.addEventListener("pointerup",gripEnd);
+grip.addEventListener("pointercancel",gripEnd);
+
 // ---------- boot ----------
-fetch("data.json").then(r=>{
-  if(!r.ok) throw new Error("data.json not found — run: python3 fetch_data.py, then serve with python3 -m http.server");
-  document.getElementById("loadMsg").textContent="Parsing 350k+ providers…";
+fetch("data/meta.json").then(r=>{
+  if(!r.ok) throw new Error("data files not found — run: python3 fetch_data.py, then serve with python3 -m http.server");
   return r.json();
-}).then(snap=>{
-  ALL=snap.points; CATS=snap.categories;
-  document.getElementById("genDate").textContent=snap.meta.generated;
-  document.getElementById("srcLink").href=snap.meta.source_url;
+}).then(m=>{
+  CATS=m.categories; COUNTS=m.counts;
+  document.getElementById("genDate").textContent=m.meta.generated;
+  document.getElementById("srcLink").href=m.meta.source_url;
   buildCatRows(); buildBoroRows();
   overlay=new deck.MapboxOverlay({
     interleaved:false,
@@ -429,6 +537,8 @@ fetch("data.json").then(r=>{
       `<div class="tip"><b>${esc(titleCase(object.a))}</b><span>${object.count} provider${object.count===1?"":"s"} · ${CATS[object.cat]}</span></div>`}
   });
   map.addControl(overlay);
+  return Promise.all([...state.cats].map(i=>loadCat(i)));
+}).then(()=>{
   const start=()=>{applyFilters(); document.getElementById("load").style.display="none";};
   map.loaded()?start():map.once("load",start);
 }).catch(err=>{

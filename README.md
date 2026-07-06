@@ -1,24 +1,35 @@
 # NYC Medicaid Provider Map
 
-A visual, filterable map of Medicaid-enrolled providers across the five NYC boroughs, built on NY State Open Data. Filter by category (dental, vision, primary care, pharmacy, behavioral health, therapy, home care, and more) and borough; search by name or address; click a location to see every provider at that address.
+A visual, filterable map of Medicaid-enrolled providers across the five NYC boroughs, built on NY State Open Data. Filter by category (dental, vision, primary care, pharmacy, behavioral health, therapy, home care, and more) and borough; search by name; find providers near an address (via [NYC GeoSearch](https://geosearch.planninglabs.nyc)) or your location; click a location to see every provider at that address.
 
-Built with MapLibre GL (CARTO Positron basemap) and deck.gl. No build step.
+Built with MapLibre GL (CARTO Positron basemap) and deck.gl. No build step. Works on phones: on small screens the map fills the viewport and the panel becomes a draggable bottom sheet.
 
 ## Run it
 
 ```bash
-python3 fetch_data.py        # pull + clean the data → data.json, providers.geojson
-python3 -m http.server 8000  # serve (data.json is ~55 MB; needs a server, not file://)
+python3 fetch_data.py        # pull + clean the data → data/, providers.geojson
+python3 -m http.server 8000  # serve (data is fetched at runtime; needs a server, not file://)
 ```
 
-Then open <http://localhost:8000>. The default view (dental + vision, ~12k points) loads instantly; toggling on the larger categories renders the full ~353k points.
+Then open <http://localhost:8000>.
 
 ## How it works
 
-- **`fetch_data.py`** — pages the NYC slice from the Socrata API, drops bad coordinates and duplicate provider-at-address rows, maps each of the 74 raw professions into ~12 display categories, and writes:
-  - `data.json` — compact snapshot the map loads
+- **`fetch_data.py`** — pages the NYC slice from the Socrata API, drops bad coordinates and duplicate provider-at-address rows, maps each of the ~74 raw professions into 12 display categories, and writes:
+  - `data/meta.json` — categories, per-category counts, snapshot date (loaded at boot)
+  - `data/cat-0.json` … `data/cat-11.json` — points per category, fetched only when that filter is enabled
   - `providers.geojson` — portable GeoJSON for GIS / other tools
 - **`index.html`** — a self-contained static page: MapLibre GL basemap + a deck.gl `ScatterplotLayer` overlay. Providers are aggregated to one dot per location (sized by provider count) on the fly, respecting the active filters.
+
+The default view (dental + vision, ~12.5k points) costs about **330 KB compressed** over the network; other categories load on demand when toggled. The largest — Physicians & Primary Care, ~304k of the ~356k points — is about 7 MB compressed, fetched only if you turn it on.
+
+### Scaling: the next rung
+
+Per-category files loaded on demand are the right size for this dataset because the app's search, nearest-location list, and live counts all want the working set in memory. If a dataset outgrows that (or you only need display), the next rung is pre-tiling: `tippecanoe` → a single [PMTiles](https://protomaps.com/docs/pmtiles) file, which browsers read by HTTP range request straight off static hosting — the browser then fetches only the tiles in view, at any dataset size.
+
+## Accessibility
+
+Filter changes are announced via live regions; the nearest-location results are real buttons (keyboard operable); the detail card closes on Esc and returns focus; text colors meet WCAG AA contrast. The map canvas itself is not keyboard-navigable — the "find providers near you" list is the accessible pathway to the same information.
 
 ## Scope & data caveats
 
