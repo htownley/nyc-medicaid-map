@@ -1,6 +1,6 @@
 # NYC Medicaid Provider Map
 
-A visual, filterable map of Medicaid-enrolled providers across the five NYC boroughs, built on NY State Open Data. Filter by category (dental, vision, primary care, pharmacy, behavioral health, therapy, home care, and more) and borough; search by name; find providers near an address (via [NYC GeoSearch](https://geosearch.planninglabs.nyc)) or your location; click a location to see every provider at that address.
+A visual, filterable map of Medicaid-enrolled providers across the five NYC boroughs, built on NY State Open Data. Filter by category (dental, vision, primary care, pharmacy, behavioral health, therapy, home care, and more) and borough; search by name; find providers near an address (via [NYC GeoSearch](https://geosearch.planninglabs.nyc)), a ZIP, a neighborhood, a borough, or your location; click a location to see every provider at that address.
 
 Built with MapLibre GL (CARTO Positron basemap) and deck.gl. No build step. Works on phones: on small screens the map fills the viewport and the panel becomes a draggable bottom sheet.
 
@@ -8,6 +8,7 @@ Built with MapLibre GL (CARTO Positron basemap) and deck.gl. No build step. Work
 
 ```bash
 python3 fetch_data.py        # pull + clean the data → data/, providers.geojson
+python3 build_gazetteer.py   # build the ZIP/neighborhood/borough search index → data/gazetteer.json
 python3 -m http.server 8000  # serve (data is fetched at runtime; needs a server, not file://)
 ```
 
@@ -19,6 +20,7 @@ Then open <http://localhost:8000>.
   - `data/meta.json` — categories, per-category counts, snapshot date (loaded at boot)
   - `data/cat-0.json` … `data/cat-11.json` — points per category, fetched only when that filter is enabled
   - `providers.geojson` — portable GeoJSON for GIS / other tools
+- **`build_gazetteer.py`** — builds `data/gazetteer.json`, a small lookup that lets the search box resolve a bare ZIP, neighborhood, or borough (things GeoSearch has no layer for and mis-parses). ZIP and borough centroids come from the provider data itself; neighborhood names + centroids come from DCP's [2020 NTAs](https://data.cityofnewyork.us/City-Government/2020-Neighborhood-Tabulation-Areas-NTAs-/9nt8-h7nd) (cached under `build_cache/`). A query that isn't a place still falls through to GeoSearch for street addresses.
 - **`index.html`** — a self-contained static page: MapLibre GL basemap + a deck.gl `ScatterplotLayer` overlay. Providers are aggregated to one dot per location (sized by provider count) on the fly, respecting the active filters.
 
 The default view (dental + vision, ~12.5k points) costs about **330 KB compressed** over the network; other categories load on demand when toggled. The largest — Physicians & Primary Care, ~304k of the ~356k points — is about 7 MB compressed, fetched only if you turn it on.
@@ -42,4 +44,4 @@ Filter changes are announced via live regions; the nearest-location results are 
 
 ## Refreshing
 
-The state updates the dataset regularly. Re-run `python3 fetch_data.py` to pull a fresh snapshot; no other changes needed.
+The state updates the dataset regularly. Re-run `python3 fetch_data.py` to pull a fresh snapshot, then `python3 build_gazetteer.py` to rebuild the ZIP/borough centroids from it. The neighborhood layer changes rarely; delete `build_cache/` if you want to re-pull the NTA boundaries too.

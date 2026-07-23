@@ -5,6 +5,9 @@ providers.geojson
 # Local Claude Code settings (per-machine state, not project content)
 .claude/
 
+# Build cache for the gazetteer (re-fetched from NYC Open Data when absent)
+build_cache/
+
 # OS / Python
 .DS_Store
 *.pyc

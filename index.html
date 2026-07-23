@@ -143,7 +143,7 @@
     <div class="section pad">
       <h2>Find providers near you</h2>
       <div class="addrRow">
-        <input id="addr" class="search" type="text" placeholder="Address, ZIP, or borough in NYC" />
+        <input id="addr" class="search" type="text" placeholder="Address, ZIP, neighborhood, or borough" />
         <button id="findBtn" class="btn">Find</button>
       </div>
       <button id="geoBtn" class="btn ghost">📍 Use my location</button>
@@ -452,25 +452,32 @@ function renderNearest(locs){
 // match those against a small gazetteer (built from the provider data) first, and only
 // fall through to GeoSearch when the query carries address tokens the gazetteer can't
 // explain. Coarsest surviving match wins: "manhattan 10001" -> Manhattan, not the ZIP.
-let GAZ=null;
+let GAZ=null, NBHD_KEYS=[];  // NBHD_KEYS: longest first so "east harlem" beats "harlem"
 const BORO_ALIASES=[  // longest first so "staten island" matches before "staten"
   ["staten island","Staten Island"],["bronx","Bronx"],["brooklyn","Brooklyn"],
   ["manhattan","Manhattan"],["queens","Queens"]
 ];
-const PLACE_STOP=new Set(["ny","nyc","new","york","usa","us","the"]);
+const PLACE_STOP=new Set(["ny","nyc","new","york","usa","us"]);
 function resolvePlace(raw){
   if(!GAZ) return null;
-  let s=raw.toLowerCase().trim();
-  if(!s) return null;
+  // normalize the query the same way build_gazetteer.py normalizes keys (drop
+  // apostrophes so "hell's" == "hells"), and pad with spaces so multi-word names
+  // ("east village") match on whole-word boundaries.
+  let s=" "+raw.toLowerCase().replace(/['’]/g,"").replace(/[^a-z0-9]+/g," ").replace(/\s+/g," ").trim()+" ";
+  if(s===" ") return null;
   let boro=null;
-  for(const [k,v] of BORO_ALIASES){ if(s.includes(k)){ boro=v; s=s.split(k).join(" "); break; } }
-  const toks=s.split(/[^a-z0-9]+/).filter(Boolean).filter(t=>!PLACE_STOP.has(t));
+  for(const [k,v] of BORO_ALIASES){ if(s.includes(" "+k+" ")){ boro=v; s=s.replace(" "+k+" "," "); break; } }
+  let nbhd=null;
+  for(const k of NBHD_KEYS){ if(s.includes(" "+k+" ")){ nbhd=GAZ.nbhds[k]; s=s.replace(" "+k+" "," "); break; } }
+  const toks=s.split(" ").filter(Boolean).filter(t=>!PLACE_STOP.has(t));
   const zipToks=toks.filter(t=>/^\d{5}$/.test(t));
   const knownZips=zipToks.filter(t=>GAZ.zips[t]);
   const otherToks=toks.filter(t=>!/^\d{5}$/.test(t));
-  // ruled out (-> GeoSearch) if any non-ZIP word remains or a 5-digit ZIP we don't know
+  // ruled out (-> GeoSearch) if any leftover word remains or a 5-digit ZIP we don't know
   if(otherToks.length || zipToks.length!==knownZips.length) return null;
+  // coarsest surviving match wins: borough > neighborhood > ZIP
   if(boro && GAZ.boroughs[boro]) return {type:"borough", c:GAZ.boroughs[boro].c, label:boro};
+  if(nbhd) return {type:"nbhd", c:nbhd.c, label:`${nbhd.d} · ${nbhd.b}`};
   if(knownZips.length){ const z=knownZips[0], e=GAZ.zips[z];
     return {type:"zip", c:e.c, label:`ZIP ${z}${e.b?` · ${e.b}`:""}`}; }
   return null;
@@ -563,7 +570,9 @@ grip.addEventListener("pointerup",gripEnd);
 grip.addEventListener("pointercancel",gripEnd);
 
 // ---------- boot ----------
-fetch("data/gazetteer.json").then(r=>r.ok?r.json():null).then(g=>{GAZ=g;}).catch(()=>{});
+fetch("data/gazetteer.json").then(r=>r.ok?r.json():null).then(g=>{
+  GAZ=g; if(g&&g.nbhds) NBHD_KEYS=Object.keys(g.nbhds).sort((a,b)=>b.length-a.length);
+}).catch(()=>{});
 fetch("data/meta.json").then(r=>{
   if(!r.ok) throw new Error("data files not found — run: python3 fetch_data.py, then serve with python3 -m http.server");
   return r.json();
