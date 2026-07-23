@@ -45,7 +45,6 @@
   .acItem{display:flex;align-items:center;gap:8px;padding:8px 8px;border-radius:6px;cursor:pointer}
   .acItem:hover,.acItem[aria-selected="true"]{background:#f8fafc}
   .acItem .lbl{flex:1;min-width:0;font-size:.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .acItem .acKind{flex:0 0 auto;font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
   /* near-me */
   .addrRow{display:flex;gap:8px}
   .addrRow .search{flex:1}
@@ -148,7 +147,6 @@
     <div class="pad">
       <p class="count" aria-live="polite"><span id="visCount">0</span>
         <small>providers at <span id="locCount">0</span> locations</small></p>
-      <p class="hint">Each dot is a location · larger = more providers there</p>
     </div>
 
     <div class="section pad">
@@ -556,10 +554,12 @@ function suggestPlaces(raw){
     if(k.startsWith(q) && GAZ.boroughs[v]){ const e=GAZ.boroughs[v];
       out.push({type:"borough", c:e.c, bb:e.bb, label:v, kind:"Borough", q:v}); }
   }
+  const seen=new Set();  // several alias keys ("bed stuy", "bedstuy") map to one neighborhood
   for(const k of NBHD_KEYS){                               // neighborhoods: prefix on normalized key
     if(out.length>=8) break;
-    if(k.startsWith(q)){ const n=GAZ.nbhds[k];
-      out.push({type:"nbhd", c:n.c, bb:n.bb, label:`${n.d} · ${n.b}`, kind:"Neighborhood", q:n.d}); }
+    if(k.startsWith(q)){ const n=GAZ.nbhds[k], label=`${n.d} · ${n.b}`;
+      if(seen.has(label)) continue; seen.add(label);
+      out.push({type:"nbhd", c:n.c, bb:n.bb, label, kind:"Neighborhood", q:n.d}); }
   }
   if(/^\d{2,5}$/.test(q)){                                 // ZIPs: prefix once a couple digits typed
     for(const z in GAZ.zips){
@@ -651,7 +651,7 @@ document.getElementById("geoBtn").onclick=doGeo;
       li.className="acItem"; li.id="acItem-"+i;
       li.setAttribute("role","option");
       li.setAttribute("aria-selected", i===active ? "true" : "false");
-      li.innerHTML=`<span class="lbl">${esc(it.label)}</span><span class="acKind">${esc(it.kind)}</span>`;
+      li.innerHTML=`<span class="lbl">${esc(it.label)}</span>`;
       // mousedown (not click) so selection wins the race against the input's blur handler
       li.addEventListener("mousedown",e=>{ e.preventDefault(); choose(i); });
       list.appendChild(li);
