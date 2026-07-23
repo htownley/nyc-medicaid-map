@@ -93,6 +93,8 @@
   #detail .drow .info{min-width:0}
   #detail .drow .info b{font-size:.88rem}
   #detail .drow .info span{display:block;font-size:.76rem;color:var(--muted)}
+  #detail .drow .info a{color:var(--accent);text-decoration:none}
+  #detail .drow .info a:hover{text-decoration:underline}
   /* loading */
   #load{position:absolute;inset:0;background:rgba(255,255,255,.92);z-index:5;display:flex;
     flex-direction:column;align-items:center;justify-content:center;gap:14px;color:var(--muted)}
@@ -141,7 +143,7 @@
     <div class="section pad">
       <h2>Find providers near you</h2>
       <div class="addrRow">
-        <input id="addr" class="search" type="text" placeholder="Address or ZIP in NYC" />
+        <input id="addr" class="search" type="text" placeholder="Address, ZIP, or borough in NYC" />
         <button id="findBtn" class="btn">Find</button>
       </div>
       <button id="geoBtn" class="btn ghost">📍 Use my location</button>
@@ -178,7 +180,7 @@
           <li><b>Source:</b> NY State <a id="srcLink" target="_blank" rel="noopener">Medicaid Enrolled Provider Listing</a>. Snapshot: <span id="genDate">—</span>.</li>
           <li><b>Enrolled ≠ in-network.</b> Most NYC Medicaid members are in managed-care plans; this lists Medicaid enrollment, a near-complete superset. Confirm a provider takes <i>your</i> plan.</li>
           <li><b>Vision</b> = optometry/optical only (eye MDs aren't separable in this data).</li>
-          <li>No phone numbers in the source; pins show address + NPI.</li>
+          <li>No phone numbers in the source; each provider's NPI links to their federal <a href="https://npiregistry.cms.hhs.gov/" target="_blank" rel="noopener">NPI registry</a> entry, which lists a self-reported phone.</li>
         </ul>
       </details>
       <p class="foot">Demo only · not an official directory.</p>
@@ -327,7 +329,7 @@ function showDetail(loc){
     const row=document.createElement("div"); row.className="drow";
     row.innerHTML=`<span class="sw" style="background:${rgbCss(PALETTE[it.c])}"></span>
       <span class="info"><b>${esc(titleCase(it.n))}</b>
-      <span>${esc(titleCase(it.pr))} · NPI ${it.np}</span></span>`;
+      <span>${esc(titleCase(it.pr))} · NPI <a href="https://npiregistry.cms.hhs.gov/provider-view/${it.np}" target="_blank" rel="noopener" title="Federal NPI registry entry (incl. phone)">${it.np} ↗</a></span></span>`;
     list.appendChild(row);
   });
   list.scrollTop=0;
@@ -445,6 +447,43 @@ function renderNearest(locs){
   }
 }
 
+// ---------- coarse place lookup (ZIP + borough) ----------
+// GeoSearch has no ZIP/borough layer and mangles "11201" into a house number, so we
+// match those against a small gazetteer (built from the provider data) first, and only
+// fall through to GeoSearch when the query carries address tokens the gazetteer can't
+// explain. Coarsest surviving match wins: "manhattan 10001" -> Manhattan, not the ZIP.
+let GAZ=null;
+const BORO_ALIASES=[  // longest first so "staten island" matches before "staten"
+  ["staten island","Staten Island"],["bronx","Bronx"],["brooklyn","Brooklyn"],
+  ["manhattan","Manhattan"],["queens","Queens"]
+];
+const PLACE_STOP=new Set(["ny","nyc","new","york","usa","us","the"]);
+function resolvePlace(raw){
+  if(!GAZ) return null;
+  let s=raw.toLowerCase().trim();
+  if(!s) return null;
+  let boro=null;
+  for(const [k,v] of BORO_ALIASES){ if(s.includes(k)){ boro=v; s=s.split(k).join(" "); break; } }
+  const toks=s.split(/[^a-z0-9]+/).filter(Boolean).filter(t=>!PLACE_STOP.has(t));
+  const zipToks=toks.filter(t=>/^\d{5}$/.test(t));
+  const knownZips=zipToks.filter(t=>GAZ.zips[t]);
+  const otherToks=toks.filter(t=>!/^\d{5}$/.test(t));
+  // ruled out (-> GeoSearch) if any non-ZIP word remains or a 5-digit ZIP we don't know
+  if(otherToks.length || zipToks.length!==knownZips.length) return null;
+  if(boro && GAZ.boroughs[boro]) return {type:"borough", c:GAZ.boroughs[boro].c, label:boro};
+  if(knownZips.length){ const z=knownZips[0], e=GAZ.zips[z];
+    return {type:"zip", c:e.c, label:`ZIP ${z}${e.b?` · ${e.b}`:""}`}; }
+  return null;
+}
+function setPlaceOrigin(place){
+  state.origin={p:place.c, label:place.label};
+  if(originMarker) originMarker.setLngLat(place.c);
+  else originMarker=new maplibregl.Marker({color:"#1d4ed8"}).setLngLat(place.c).addTo(map);
+  map.flyTo({center:place.c, zoom:place.type==="borough"?10.5:13});
+  setAddrStatus(`Showing <b>${esc(place.label)}</b> · <a data-clear>clear</a>`);
+  applyFilters();
+}
+
 async function geocode(text){
   const r=await fetch("https://geosearch.planninglabs.nyc/v2/search?size=1&text="+encodeURIComponent(text));
   if(!r.ok) throw new Error("geocoder unavailable");
@@ -456,6 +495,8 @@ async function geocode(text){
 async function doFind(){
   const t=document.getElementById("addr").value.trim();
   if(!t) return;
+  const place=resolvePlace(t);
+  if(place){ setPlaceOrigin(place); return; }
   setAddrStatus("Searching…");
   try{
     const g=await geocode(t);
@@ -522,6 +563,7 @@ grip.addEventListener("pointerup",gripEnd);
 grip.addEventListener("pointercancel",gripEnd);
 
 // ---------- boot ----------
+fetch("data/gazetteer.json").then(r=>r.ok?r.json():null).then(g=>{GAZ=g;}).catch(()=>{});
 fetch("data/meta.json").then(r=>{
   if(!r.ok) throw new Error("data files not found — run: python3 fetch_data.py, then serve with python3 -m http.server");
   return r.json();

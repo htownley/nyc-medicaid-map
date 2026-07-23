@@ -38,7 +38,7 @@ Filter changes are announced via live regions; the nearest-location results are 
 - **Providers:** all professions, **direct-service only** — `medicaid_type` FFS + MCO. OPRA (order/refer-only, non-billing) providers are excluded.
 - **Enrolled ≠ in-network.** Most NYC Medicaid recipients are in managed-care plans. This dataset reflects Medicaid *enrollment* (FFS billing eligibility), not plan-network membership — a near-complete **superset**. The authoritative "does this provider take my Medicaid" answer is the member's managed-care plan directory.
 - **Vision** = optometrists / opticians / optical establishments only. Ophthalmologists (eye MDs) sit under the generic `PHYSICIAN` category with no specialty field, so they can't be isolated.
-- **No phone numbers** — the published columns omit the telephone field the data dictionary advertises. Details show address + NPI.
+- **No phone numbers** — the published columns omit the telephone field the data dictionary advertises. As a stopgap, each provider's NPI in the detail card links to their federal [NPPES registry](https://npiregistry.cms.hhs.gov/) entry (`provider-view/{NPI}`), which lists a self-reported phone. Registry data can be stale, and organizations show one org-level number for all their sites.
 
 ## Refreshing
 
