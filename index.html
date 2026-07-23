@@ -476,17 +476,21 @@ function resolvePlace(raw){
   // ruled out (-> GeoSearch) if any leftover word remains or a 5-digit ZIP we don't know
   if(otherToks.length || zipToks.length!==knownZips.length) return null;
   // coarsest surviving match wins: borough > neighborhood > ZIP
-  if(boro && GAZ.boroughs[boro]) return {type:"borough", c:GAZ.boroughs[boro].c, label:boro};
-  if(nbhd) return {type:"nbhd", c:nbhd.c, label:`${nbhd.d} · ${nbhd.b}`};
+  if(boro && GAZ.boroughs[boro]){ const e=GAZ.boroughs[boro];
+    return {type:"borough", c:e.c, bb:e.bb, label:boro}; }
+  if(nbhd) return {type:"nbhd", c:nbhd.c, bb:nbhd.bb, label:`${nbhd.d} · ${nbhd.b}`};
   if(knownZips.length){ const z=knownZips[0], e=GAZ.zips[z];
-    return {type:"zip", c:e.c, label:`ZIP ${z}${e.b?` · ${e.b}`:""}`}; }
+    return {type:"zip", c:e.c, bb:e.bb, label:`ZIP ${z}${e.b?` · ${e.b}`:""}`}; }
   return null;
 }
 function setPlaceOrigin(place){
   state.origin={p:place.c, label:place.label};
   if(originMarker) originMarker.setLngLat(place.c);
   else originMarker=new maplibregl.Marker({color:"#1d4ed8"}).setLngLat(place.c).addTo(map);
-  map.flyTo({center:place.c, zoom:place.type==="borough"?10.5:13});
+  // fit the place's actual footprint; cap zoom so a tiny ZIP/neighborhood doesn't over-zoom
+  if(place.bb) map.fitBounds([[place.bb[0],place.bb[1]],[place.bb[2],place.bb[3]]],
+                             {padding:40, maxZoom:place.type==="borough"?13:15});
+  else map.flyTo({center:place.c, zoom:place.type==="borough"?10.5:13});
   setAddrStatus(`Showing <b>${esc(place.label)}</b> · <a data-clear>clear</a>`);
   applyFilters();
 }

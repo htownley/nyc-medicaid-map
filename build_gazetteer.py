@@ -45,11 +45,14 @@ NBHD_ALIASES = {
 }
 
 
-def median(xs):
-    xs = sorted(xs)
+def med_sorted(xs):
     n = len(xs)
     m = n // 2
     return xs[m] if n % 2 else (xs[m - 1] + xs[m]) / 2
+
+
+def pct_sorted(xs, q):
+    return xs[min(len(xs) - 1, max(0, round(q / 100 * (len(xs) - 1))))]
 
 
 def new_acc():
@@ -64,7 +67,12 @@ def add(acc, lon, lat, boro):
 
 
 def finalize(acc, with_boro):
-    e = {"c": [round(median(acc["lon"]), 5), round(median(acc["lat"]), 5)]}
+    # median for the marker point; 1st–99th percentile box for framing, so the map
+    # fits the actual footprint while a handful of mislocated points can't blow it up.
+    lon, lat = sorted(acc["lon"]), sorted(acc["lat"])
+    e = {"c": [round(med_sorted(lon), 5), round(med_sorted(lat), 5)],
+         "bb": [round(pct_sorted(lon, 1), 5), round(pct_sorted(lat, 1), 5),
+                round(pct_sorted(lon, 99), 5), round(pct_sorted(lat, 99), 5)]}
     if with_boro and acc["boro"]:
         e["b"] = max(acc["boro"], key=acc["boro"].get)
     return e
@@ -107,6 +115,19 @@ def nta_centroid(geom):
     return [round(best_c[0], 5), round(best_c[1], 5)]
 
 
+def nta_bbox(geom):
+    """Bounding box of an NTA's geometry — authoritative, so no outlier trimming needed."""
+    minx = miny = 1e9
+    maxx = maxy = -1e9
+    polys = geom["coordinates"] if geom["type"] == "MultiPolygon" else [geom["coordinates"]]
+    for poly in polys:
+        for ring in poly:
+            for x, y in ring:
+                minx, maxx = min(minx, x), max(maxx, x)
+                miny, maxy = min(miny, y), max(maxy, y)
+    return [round(minx, 5), round(miny, 5), round(maxx, 5), round(maxy, 5)]
+
+
 def load_ntas():
     """Residential NTA features, from local cache or NYC Open Data."""
     if not os.path.exists(NTA_CACHE):
@@ -133,14 +154,14 @@ def build_neighborhoods():
         p = f["properties"]
         name, boro = p["ntaname"], p["boroname"]
         area = float(p.get("shape_area") or 0)
-        c = nta_centroid(f["geometry"])
+        c, bb = nta_centroid(f["geometry"]), nta_bbox(f["geometry"])
         base = re.sub(r"\s*\([^)]*\)", "", name).strip()  # drop "(West)" etc.
         segs = [base] if (norm(base) in HYPHEN_KEEP or "-" not in base) else base.split("-")
         for seg in segs:
             k = norm(seg)
             if not k or (k in best and best[k][0] >= area):
                 continue
-            best[k] = (area, {"c": c, "b": boro, "d": seg.strip()})
+            best[k] = (area, {"c": c, "bb": bb, "b": boro, "d": seg.strip()})
     nbhds = {k: v[1] for k, v in best.items()}
     for alias, target in NBHD_ALIASES.items():
         if target in nbhds:
