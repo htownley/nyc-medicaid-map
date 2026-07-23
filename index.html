@@ -35,6 +35,17 @@
   .search{width:100%;padding:10px 12px;font-size:.95rem;border:1px solid var(--line);
     border-radius:8px;outline:none}
   .search:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(29,78,216,.15)}
+  /* typeahead */
+  .acWrap{position:relative;flex:1}
+  .acWrap .search{width:100%}
+  .acList{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:20;margin:0;padding:4px;
+    list-style:none;background:#fff;border:1px solid var(--line);border-radius:8px;
+    box-shadow:0 6px 20px rgba(15,23,42,.14);max-height:280px;overflow:auto}
+  .acList[hidden]{display:none}
+  .acItem{display:flex;align-items:center;gap:8px;padding:8px 8px;border-radius:6px;cursor:pointer}
+  .acItem:hover,.acItem[aria-selected="true"]{background:#f8fafc}
+  .acItem .lbl{flex:1;min-width:0;font-size:.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .acItem .acKind{flex:0 0 auto;font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
   /* near-me */
   .addrRow{display:flex;gap:8px}
   .addrRow .search{flex:1}
@@ -143,7 +154,12 @@
     <div class="section pad">
       <h2>Find providers near you</h2>
       <div class="addrRow">
-        <input id="addr" class="search" type="text" placeholder="Address, ZIP, neighborhood, or borough" />
+        <div class="acWrap">
+          <input id="addr" class="search" type="text" role="combobox"
+                 aria-autocomplete="list" aria-expanded="false" aria-controls="acList"
+                 autocomplete="off" placeholder="Address, ZIP, neighborhood, or borough" />
+          <ul id="acList" class="acList" role="listbox" hidden></ul>
+        </div>
         <button id="findBtn" class="btn">Find</button>
       </div>
       <button id="geoBtn" class="btn ghost">📍 Use my location</button>
@@ -222,10 +238,51 @@ const BOROUGHS = ["Bronx","Brooklyn","Manhattan","Queens","Staten Island"];
 const titleCase = s => (s||"").toLowerCase().replace(/\b([a-z])/g,(m,c)=>c.toUpperCase());
 
 let CATS=[], COUNTS=[], overlay, map;
+let lastLocs=[];     // most recent aggregated locations, for restoring a shared ?loc card
 const CAT_DATA=[];   // per-category point arrays, fetched on demand
 const catLoads=[];   // in-flight fetch promise per category
-const state = { cats:new Set(DEFAULT_ON), boros:new Set(BOROUGHS), search:"", origin:null };
+const state = { cats:new Set(DEFAULT_ON), boros:new Set(BOROUGHS), search:"", origin:null, selected:null };
 const esc = s => (s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// ---------- shareable / deep-linkable URLs: URL <-> state ----------
+// The query string is a serialization of `state`. We only write params that
+// differ from the defaults, so a bare link stays clean and a deep link carries
+// only what differs. Geolocation origins are deliberately never serialized
+// (state.origin.q is only set for typed places/addresses).
+const BORO_CODE = {"Bronx":"bx","Brooklyn":"bk","Manhattan":"mn","Queens":"qn","Staten Island":"si"};
+const CODE_BORO = Object.fromEntries(Object.entries(BORO_CODE).map(([k,v])=>[v,k]));
+const sameSet = (a,b) => a.size===b.size && [...a].every(x=>b.has(x));
+function syncURL(){
+  const p=new URLSearchParams();
+  if(!sameSet(state.cats,DEFAULT_ON)) p.set("cats",[...state.cats].sort((a,b)=>a-b).join(","));
+  if(state.boros.size!==BOROUGHS.length) p.set("boros",BOROUGHS.filter(b=>state.boros.has(b)).map(b=>BORO_CODE[b]).join(","));
+  if(state.search.trim()) p.set("q",state.search.trim());
+  if(state.origin && state.origin.q) p.set("near",state.origin.q);
+  if(state.selected) p.set("loc",state.selected.p[0]+","+state.selected.p[1]);
+  const qs=p.toString();
+  // replaceState (not push) — filter tweaks shouldn't stack Back-button entries.
+  history.replaceState(null,"",qs ? "?"+qs : location.pathname);
+}
+// Read ?params into state. cats validation needs CATS, so call after meta loads.
+// Returns the deferred bits (near/loc) to replay once data + gazetteer are ready.
+function applyQueryToState(){
+  const p=new URLSearchParams(location.search);
+  // A present param wins even when it resolves to an empty set — that's how an
+  // "all off" selection round-trips. Only an absent param keeps the default.
+  if(p.has("cats")){
+    const idx=p.get("cats").split(",").filter(s=>s!=="").map(Number).filter(n=>Number.isInteger(n)&&n>=0&&n<CATS.length);
+    state.cats=new Set(idx);
+  }
+  if(p.has("boros")){
+    const bs=p.get("boros").split(",").map(c=>CODE_BORO[c]).filter(Boolean);
+    state.boros=new Set(bs);
+  }
+  if(p.has("q")){
+    state.search=p.get("q");
+    const el=document.getElementById("search"); if(el) el.value=state.search;
+  }
+  return { near:p.get("near"), loc:p.get("loc") };
+}
 
 const map_ = new maplibregl.Map({
   container:"map",
@@ -311,11 +368,13 @@ function applyFilters(){
     }
   }
   const locs = aggregate(providers);
+  lastLocs = locs;
   overlay.setProps({layers:[makeLayer(locs)]});
   document.getElementById("visCount").textContent = providers.length.toLocaleString();
   document.getElementById("locCount").textContent = locs.length.toLocaleString();
   refreshCatRows();
   renderNearest(locs);
+  syncURL();
 }
 
 // ---------- detail card (a location and all its providers) ----------
@@ -337,11 +396,13 @@ function showDetail(loc){
   if(!card.classList.contains("show")) detailReturnFocus=document.activeElement;
   card.classList.add("show");
   card.querySelector(".x").focus();
+  state.selected=loc; syncURL();
 }
 function hideDetail(){
   document.getElementById("detail").classList.remove("show");
   if(detailReturnFocus && document.contains(detailReturnFocus)) detailReturnFocus.focus();
   detailReturnFocus=null;
+  state.selected=null; syncURL();
 }
 document.addEventListener("keydown",e=>{
   if(e.key==="Escape" && document.getElementById("detail").classList.contains("show")) hideDetail();
@@ -374,7 +435,7 @@ function buildBoroRows(){
   const wrap=document.getElementById("boros"); wrap.innerHTML="";
   BOROUGHS.forEach(b=>{
     const row=document.createElement("label"); row.className="row";
-    row.innerHTML=`<input type="checkbox" checked/><span class="nm">${b}</span>`;
+    row.innerHTML=`<input type="checkbox" ${state.boros.has(b)?"checked":""}/><span class="nm">${b}</span>`;
     row.querySelector("input").addEventListener("change",e=>{
       e.target.checked?state.boros.add(b):state.boros.delete(b); applyFilters();
     });
@@ -408,8 +469,8 @@ function haversineMi(a,b){ // a,b = [lon,lat]
 }
 const fmtDist = mi => mi<0.1 ? `${Math.round(mi*5280)} ft` : `${mi.toFixed(1)} mi`;
 
-function setOrigin(lon,lat,label){
-  state.origin={p:[lon,lat],label};
+function setOrigin(lon,lat,label,q){
+  state.origin={p:[lon,lat],label,q};
   if(originMarker) originMarker.setLngLat([lon,lat]);
   else originMarker=new maplibregl.Marker({color:"#1d4ed8"}).setLngLat([lon,lat]).addTo(map);
   map.flyTo({center:[lon,lat],zoom:14});
@@ -483,8 +544,34 @@ function resolvePlace(raw){
     return {type:"zip", c:e.c, bb:e.bb, label:`ZIP ${z}${e.b?` · ${e.b}`:""}`}; }
   return null;
 }
-function setPlaceOrigin(place){
-  state.origin={p:place.c, label:place.label};
+// typeahead-grade place lookup: unlike resolvePlace (single coarsest match, submit-grade),
+// this returns several partial-prefix candidates from the gazetteer for the live dropdown.
+// Each carries a `q` that resolvePlace/geocode can re-resolve, so picks round-trip via ?near.
+function suggestPlaces(raw){
+  if(!GAZ) return [];
+  const q=raw.toLowerCase().replace(/['’]/g,"").replace(/[^a-z0-9]+/g," ").replace(/\s+/g," ").trim();
+  if(!q) return [];
+  const out=[];
+  for(const [k,v] of BORO_ALIASES){                       // boroughs: alias prefix
+    if(k.startsWith(q) && GAZ.boroughs[v]){ const e=GAZ.boroughs[v];
+      out.push({type:"borough", c:e.c, bb:e.bb, label:v, kind:"Borough", q:v}); }
+  }
+  for(const k of NBHD_KEYS){                               // neighborhoods: prefix on normalized key
+    if(out.length>=8) break;
+    if(k.startsWith(q)){ const n=GAZ.nbhds[k];
+      out.push({type:"nbhd", c:n.c, bb:n.bb, label:`${n.d} · ${n.b}`, kind:"Neighborhood", q:n.d}); }
+  }
+  if(/^\d{2,5}$/.test(q)){                                 // ZIPs: prefix once a couple digits typed
+    for(const z in GAZ.zips){
+      if(out.length>=12) break;
+      if(z.startsWith(q)){ const e=GAZ.zips[z];
+        out.push({type:"zip", c:e.c, bb:e.bb, label:`ZIP ${z}${e.b?` · ${e.b}`:""}`, kind:"ZIP", q:z}); }
+    }
+  }
+  return out.slice(0,5);
+}
+function setPlaceOrigin(place,q){
+  state.origin={p:place.c, label:place.label, q};
   if(originMarker) originMarker.setLngLat(place.c);
   else originMarker=new maplibregl.Marker({color:"#1d4ed8"}).setLngLat(place.c).addTo(map);
   // fit the place's actual footprint; cap zoom so a tiny ZIP/neighborhood doesn't over-zoom
@@ -503,16 +590,33 @@ async function geocode(text){
   const f=j.features[0];
   return {lon:f.geometry.coordinates[0], lat:f.geometry.coordinates[1], label:f.properties.label};
 }
+// prefix-ranked street suggestions for the live dropdown; NYC-biased via focus.point.
+// Never throws into the keystroke path — returns [] on abort or any error.
+async function autocomplete(text,signal){
+  const url="https://geosearch.planninglabs.nyc/v2/autocomplete?size=5"+
+    "&focus.point.lat=40.71&focus.point.lon=-73.99&text="+encodeURIComponent(text);
+  try{
+    const r=await fetch(url,{signal});
+    if(!r.ok) return [];
+    const j=await r.json();
+    return (j.features||[]).map(f=>({
+      type:"address", kind:"Address",
+      label:f.properties.label,
+      c:[f.geometry.coordinates[0], f.geometry.coordinates[1]],
+      q:f.properties.label
+    }));
+  }catch(e){ return []; }
+}
 async function doFind(){
   const t=document.getElementById("addr").value.trim();
   if(!t) return;
   const place=resolvePlace(t);
-  if(place){ setPlaceOrigin(place); return; }
+  if(place){ setPlaceOrigin(place,t); return; }
   setAddrStatus("Searching…");
   try{
     const g=await geocode(t);
     if(!g){ setAddrStatus("No NYC match found — try a street address or ZIP."); return; }
-    setOrigin(g.lon,g.lat,g.label);
+    setOrigin(g.lon,g.lat,g.label,t);
   }catch(e){ setAddrStatus("Address lookup failed. Check your connection."); }
 }
 function doGeo(){
@@ -526,7 +630,77 @@ function doGeo(){
 
 document.getElementById("findBtn").onclick=doFind;
 document.getElementById("geoBtn").onclick=doGeo;
-document.getElementById("addr").addEventListener("keydown",e=>{ if(e.key==="Enter") doFind(); });
+
+// ---------- typeahead ----------
+// Blends instant local gazetteer hits (suggestPlaces) with GeoSearch /autocomplete street
+// addresses in one dropdown. Selecting a row reuses the existing origin setters; Enter with a
+// closed/empty list still falls back to doFind(), so the submit path stays a complete fallback.
+(function(){
+  const input=document.getElementById("addr"), list=document.getElementById("acList");
+  let items=[], active=-1, debounce=null, ac=null, reqSeq=0;
+
+  function close(){
+    list.hidden=true; list.innerHTML=""; items=[]; active=-1;
+    input.setAttribute("aria-expanded","false");
+  }
+  function render(){
+    if(!items.length){ close(); return; }
+    list.innerHTML="";
+    items.forEach((it,i)=>{
+      const li=document.createElement("li");
+      li.className="acItem"; li.id="acItem-"+i;
+      li.setAttribute("role","option");
+      li.setAttribute("aria-selected", i===active ? "true" : "false");
+      li.innerHTML=`<span class="lbl">${esc(it.label)}</span><span class="acKind">${esc(it.kind)}</span>`;
+      // mousedown (not click) so selection wins the race against the input's blur handler
+      li.addEventListener("mousedown",e=>{ e.preventDefault(); choose(i); });
+      list.appendChild(li);
+    });
+    list.hidden=false; input.setAttribute("aria-expanded","true");
+  }
+  function setActive(i){
+    if(!items.length) return;
+    active=(i+items.length)%items.length;
+    [...list.children].forEach((li,n)=>li.setAttribute("aria-selected", n===active?"true":"false"));
+    const el=list.children[active]; if(el) el.scrollIntoView({block:"nearest"});
+  }
+  function choose(i){
+    const it=items[i]; if(!it) return;
+    input.value=it.q || it.label;
+    close();
+    if(it.type==="address") setOrigin(it.c[0], it.c[1], it.label, it.q);
+    else setPlaceOrigin(it, it.q);
+  }
+  function refresh(){
+    const raw=input.value.trim();
+    if(!raw){ close(); return; }
+    items=suggestPlaces(raw); active=-1; render();   // local hits first, instant
+    if(ac) ac.abort();
+    ac=new AbortController();
+    const seq=++reqSeq, localCount=items.length;
+    autocomplete(raw, ac.signal).then(addr=>{
+      if(seq!==reqSeq) return;                        // a newer keystroke superseded us
+      items=items.slice(0,localCount).concat(addr);
+      if(active>=items.length) active=-1;
+      render();
+    });
+  }
+
+  input.addEventListener("input",()=>{ clearTimeout(debounce); debounce=setTimeout(refresh,200); });
+  input.addEventListener("keydown",e=>{
+    const open=!list.hidden && items.length;
+    if(e.key==="ArrowDown"){ if(open){ e.preventDefault(); setActive(active+1); } }
+    else if(e.key==="ArrowUp"){ if(open){ e.preventDefault(); setActive(active-1); } }
+    else if(e.key==="Enter"){
+      clearTimeout(debounce);
+      if(open && active>=0){ e.preventDefault(); choose(active); }
+      else { close(); doFind(); }
+    }
+    else if(e.key==="Escape"){ if(open){ e.preventDefault(); close(); } }
+  });
+  input.addEventListener("blur",()=>setTimeout(close,120));  // let a row mousedown land first
+})();
+
 document.getElementById("addrStatus").addEventListener("click",e=>{
   if(e.target.matches("[data-clear]")) clearOrigin();
 });
@@ -582,6 +756,7 @@ fetch("data/meta.json").then(r=>{
   return r.json();
 }).then(m=>{
   CATS=m.categories; COUNTS=m.counts;
+  const deferred=applyQueryToState();   // pull cats/boros/q from ?params (needs CATS); returns near/loc
   document.getElementById("genDate").textContent=m.meta.generated;
   document.getElementById("srcLink").href=m.meta.source_url;
   buildCatRows(); buildBoroRows();
@@ -592,9 +767,19 @@ fetch("data/meta.json").then(r=>{
       `<div class="tip"><b>${esc(titleCase(object.a))}</b><span>${object.count} provider${object.count===1?"":"s"} · ${CATS[object.cat]}</span></div>`}
   });
   map.addControl(overlay);
-  return Promise.all([...state.cats].map(i=>loadCat(i)));
-}).then(()=>{
-  const start=()=>{applyFilters(); document.getElementById("load").style.display="none";};
+  return Promise.all([...state.cats].map(i=>loadCat(i))).then(()=>deferred);
+}).then(deferred=>{
+  const start=()=>{
+    applyFilters();
+    document.getElementById("load").style.display="none";
+    // replay the deferred bits now that data + gazetteer are ready
+    if(deferred.near){ document.getElementById("addr").value=deferred.near; doFind(); }
+    if(deferred.loc){
+      const [lon,lat]=deferred.loc.split(",").map(Number);
+      const hit=lastLocs.find(l=>l.p[0]===lon && l.p[1]===lat);
+      if(hit) showDetail(hit);   // silently ignored if filtered out / no longer present
+    }
+  };
   map.loaded()?start():map.once("load",start);
 }).catch(err=>{
   document.getElementById("load").innerHTML=
