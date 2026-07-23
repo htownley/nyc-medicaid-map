@@ -1,5 +1,7 @@
 # NYC Medicaid Provider Map
 
+**Live demo:** <https://htownley.github.io/nyc-medicaid-map/>
+
 A visual, filterable map of Medicaid-enrolled providers across the five NYC boroughs, built on NY State Open Data. Filter by category (dental, vision, primary care, pharmacy, behavioral health, therapy, home care, and more) and borough; search by name; find providers near an address (via [NYC GeoSearch](https://geosearch.planninglabs.nyc)), a ZIP, a neighborhood, a borough, or your location; click a location to see every provider at that address.
 
 Built with MapLibre GL (CARTO Positron basemap) and deck.gl. No build step. Works on phones: on small screens the map fills the viewport and the panel becomes a draggable bottom sheet.
