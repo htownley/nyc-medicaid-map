@@ -284,13 +284,9 @@ function applyQueryToState(){
 
 const map_ = new maplibregl.Map({
   container:"map",
-  style:{
-    version:8,
-    sources:{carto:{type:"raster",
-      tiles:["a","b","c","d"].map(s=>`https://${s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png`),
-      tileSize:256, attribution:"© OpenStreetMap contributors © CARTO"}},
-    layers:[{id:"carto",type:"raster",source:"carto"}]
-  },
+  // OpenFreeMap: keyless OpenMapTiles vector tiles. Attribution (OpenFreeMap /
+  // OpenMapTiles / OpenStreetMap) comes from the style's TileJSON automatically.
+  style:"https://tiles.openfreemap.org/styles/positron",
   center:[-73.95,40.70], zoom:10, minZoom:9, maxZoom:18
 });
 map = map_;
